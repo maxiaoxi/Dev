@@ -1,0 +1,73 @@
+ #region 获取 班次           
+            //获取班次的方法,在数据库里设置时间段,根据当前时间去匹配 
+            //根据配置的班次开始时间+班次时间计算班次的时间段
+            //每次计算时先检索,如果没检索到就计算一次，更新到数据库
+            //检索一次数据
+            List<string> filter = new List<string>() { "SHIFT_TIME_END", "SHIFT", "SHIFT_TIME_START", "SHIFT_TIME" };
+            var lifilter = db.GetList<M_DIRECTORY>(o => filter.Contains(o.M_GROUP));
+            var shiftsEndTime = lifilter.Where(o => o.M_GROUP == "SHIFT_TIME_END");
+            var shifts = lifilter.Where(o => o.M_GROUP == "SHIFT");
+            var shiftsStartTime = lifilter.Where(o => o.M_GROUP == "SHIFT_TIME_START");
+            var shiftsTime = lifilter.Where(o => o.M_GROUP == "SHIFT_TIME");
+
+            //如果没有值,重新计算
+            if (shiftsEndTime.ToList().Count == 0)
+            {
+                shifts.ToList().ForEach(o =>
+                {
+                    var stTm = shiftsStartTime.Where(f => f.M_KEY.Equals(o.M_KEY)).First().M_VALUE;
+                    var sftTm = shiftsTime.Where(f => f.M_KEY.Equals(o.M_KEY)).First().M_VALUE;
+                    M_DIRECTORY tmp = new M_DIRECTORY
+                    {
+                        M_OWNER = "ROOT",
+                        M_GROUP = "SHIFT_TIME_END",
+                        M_KEY = o.M_KEY,
+                        M_VALUE = System.DateTime.Parse($"{ System.DateTime.Now.ToString("yyyy-MM-dd")} {stTm}").AddHours(double.Parse(sftTm)).ToString("HH:mm")
+                    };
+
+                    this.db.Trans(() =>
+                    {
+                        this.db.Add(tmp);
+                    });
+                });
+
+                //再次取数值
+                shiftsEndTime = db.GetList<M_DIRECTORY>(o => o.M_GROUP == "SHIFT_TIME_END");
+            }
+            //对当前时间
+            System.DateTime currentTm = System.DateTime.Parse(System.DateTime.Now.ToString("HH:mm"));
+            //当前班次
+            M_DIRECTORY cutShift = null;
+
+            foreach (M_DIRECTORY sft in shifts)
+            {
+                System.DateTime stTm = System.DateTime.Parse(shiftsStartTime.Where(f => f.M_KEY.Equals(sft.M_KEY)).First().M_VALUE);
+                System.DateTime endTm = System.DateTime.Parse(shiftsEndTime.Where(f => f.M_KEY.Equals(sft.M_KEY)).First().M_VALUE);
+                System.DateTime minTm = System.DateTime.Parse("00:00");
+                System.DateTime maxTm = System.DateTime.Parse("23:59");
+                //开始时间大于结束时间,说明是跨夜
+                if (System.DateTime.Compare(stTm, endTm) > 0)
+                {
+                    //比较两次,大于开始时间小于23:59 或者 大于00:00小于结束时间
+                    if (System.DateTime.Compare(currentTm, stTm) >= 0 && System.DateTime.Compare(maxTm, currentTm) >= 0)
+                    {
+                        cutShift = sft;
+                        break;
+                    }                    
+                    if (System.DateTime.Compare(currentTm, minTm) >= 0 && System.DateTime.Compare(endTm, currentTm) >= 0)
+                    {
+                        cutShift = sft;
+                        break;
+                    }
+                }
+                else
+                {
+                    //在开始结束时间之间
+                    if (System.DateTime.Compare(currentTm, stTm) >= 0 && System.DateTime.Compare(endTm, currentTm) >= 0)
+                    {
+                        cutShift = sft;
+                        break;
+                    }
+                }
+            }
+            #endregion
